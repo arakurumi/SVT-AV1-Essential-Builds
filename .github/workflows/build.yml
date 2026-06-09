@@ -241,14 +241,22 @@ jobs:
 
           test "$(git -C source rev-parse HEAD)" = "${{ needs.check_upstream.outputs.sha }}"
 
+      - name: Patch Linux static link options
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          perl -0pi -e 's/(option\(EXT_LIB_STATIC "Force linking with static libraries for external dependencies" OFF\))/if(UNIX AND NOT APPLE)\n    target_link_options(SvtAv1EncApp PRIVATE -static -no-pie)\nendif()\n\n$1/' source/CMakeLists.txt
+          grep -F 'target_link_options(SvtAv1EncApp PRIVATE -static -no-pie)' source/CMakeLists.txt
+
       - name: Build Linux binary
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           cd source/Build/linux
-          PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)" -- \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -no-pie"
+          PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
 
       - name: Build Windows binary
         if: runner.os == 'Windows'
