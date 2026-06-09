@@ -1,0 +1,324 @@
+name: Build SVT-AV1-Essential
+
+on:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Build even if this upstream commit was already built successfully."
+        required: false
+        type: boolean
+        default: false
+  schedule:
+    - cron: "0 0 * * *"
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  UPSTREAM_REPOSITORY: https://github.com/nekotrix/SVT-AV1-Essential.git
+  BUILD_ARGS: --release --enable-lto --static use-ffms2
+
+concurrency:
+  group: svt-av1-essential-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check_upstream:
+    name: Check upstream update
+    runs-on: ubuntu-24.04
+    outputs:
+      sha: ${{ steps.upstream.outputs.sha }}
+      cache_hit: ${{ steps.built_cache.outputs.cache-hit }}
+      should_build: ${{ steps.decision.outputs.should_build }}
+    steps:
+      - name: Resolve upstream revision
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git init --quiet /tmp/upstream-resolve
+          git -C /tmp/upstream-resolve remote add origin "${UPSTREAM_REPOSITORY}"
+          git -C /tmp/upstream-resolve fetch --depth=1 origin HEAD
+          SHA="$(git -C /tmp/upstream-resolve rev-parse 'FETCH_HEAD^{commit}')"
+
+          if [[ -z "${SHA}" ]]; then
+            echo "Could not resolve upstream revision." >&2
+            exit 1
+          fi
+
+          {
+            echo "sha=${SHA}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Restore build marker
+        id: built_cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .upstream-build-cache
+          key: svt-av1-essential-${{ steps.upstream.outputs.sha }}
+
+      - name: Decide whether to build
+        id: decision
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.force }}" == "true" ]]; then
+            SHOULD_BUILD="true"
+          elif [[ "${{ steps.built_cache.outputs.cache-hit }}" == "true" ]]; then
+            SHOULD_BUILD="false"
+            echo "Upstream commit ${{ steps.upstream.outputs.sha }} was already built successfully."
+          else
+            SHOULD_BUILD="true"
+          fi
+
+          echo "should_build=${SHOULD_BUILD}" >> "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.name }}
+    needs: check_upstream
+    if: needs.check_upstream.outputs.should_build == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            artifact: svt-av1-essential-linux-x64
+          - name: Windows x64
+            runner: windows-2022
+            artifact: svt-av1-essential-windows-x64
+    steps:
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            clang \
+            cmake \
+            git \
+            libffms2-dev \
+            lld \
+            nasm \
+            ninja-build \
+            pkg-config \
+            yasm
+
+      - name: Set up MSYS2
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: CLANG64
+          update: true
+          install: >-
+            git
+            base-devel
+            mingw-w64-clang-x86_64-clang
+            mingw-w64-clang-x86_64-cmake
+            mingw-w64-clang-x86_64-ffms2
+            mingw-w64-clang-x86_64-lld
+            mingw-w64-clang-x86_64-nasm
+            mingw-w64-clang-x86_64-ninja
+            mingw-w64-clang-x86_64-pkgconf
+            mingw-w64-clang-x86_64-yasm
+
+      - name: Clone upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git init source
+          git -C source remote add origin "${UPSTREAM_REPOSITORY}"
+          git -C source fetch --depth 1 origin HEAD
+          git -C source checkout --detach FETCH_HEAD
+
+          test "$(git -C source rev-parse HEAD)" = "${{ needs.check_upstream.outputs.sha }}"
+
+      - name: Build Linux binary
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd source/Build/linux
+          ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
+
+      - name: Build Windows binary
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          cd source/Build/linux
+          ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
+
+      - name: Package Linux artifact
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          install -d package
+          cp source/Bin/Release/SvtAv1EncApp package/
+          cp source/LICENSE*.md source/PATENTS.md package/
+          git -C source rev-parse HEAD > package/upstream-sha.txt
+          source/Bin/Release/SvtAv1EncApp --version | tee package/version.txt
+          { ldd source/Bin/Release/SvtAv1EncApp || true; } | tee package/ldd.txt
+          grep -i ffms package/ldd.txt || echo "No dynamic FFMS2 dependency found; this is expected for static FFMS2 linkage."
+
+      - name: Package Windows artifact
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+
+          mkdir -p package
+          cp source/Bin/Release/SvtAv1EncApp.exe package/
+          cp source/LICENSE*.md source/PATENTS.md package/
+          git -C source rev-parse HEAD > package/upstream-sha.txt
+          source/Bin/Release/SvtAv1EncApp.exe --version | tee package/version.txt
+          { ldd source/Bin/Release/SvtAv1EncApp.exe || true; } | tee package/ldd.txt
+          grep -i ffms package/ldd.txt || echo "No dynamic FFMS2 dependency found; this is expected for static FFMS2 linkage."
+
+          awk '/\/clang64\/bin\// { print $3 }' package/ldd.txt | sort -u | while read -r dll; do
+            if [[ -f "${dll}" ]]; then
+              cp -n "${dll}" package/
+            fi
+          done
+
+      - name: Read package version
+        id: package_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          upstream_version="$(sed 's/\r$//' package/version.txt | grep -Eo 'v?[0-9]+([.][0-9]+)+([-+][A-Za-z0-9._-]+)?' | head -n1 || true)"
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="$(sed 's/\r$//' package/version.txt | sed '/^[[:space:]]*$/d' | head -n1)"
+          fi
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="unknown-version"
+          fi
+
+          safe_version="$(printf '%s' "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${safe_version}" ]]; then
+            safe_version="unknown-version"
+          fi
+
+          {
+            echo "upstream_version=${upstream_version}"
+            echo "safe_version=${safe_version}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}-${{ steps.package_meta.outputs.safe_version }}
+          path: package/
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - check_upstream
+      - build
+    if: needs.check_upstream.outputs.should_build == 'true' && success()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-input
+
+      - name: Prepare release assets
+        id: release_meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mkdir -p release-assets
+          for artifact_dir in release-input/*; do
+            artifact_name="$(basename "${artifact_dir}")"
+            tar -czf "release-assets/${artifact_name}.tar.gz" -C "${artifact_dir}" .
+          done
+
+          version_file="$(find release-input -name version.txt -print -quit)"
+          upstream_version="$(sed 's/\r$//' "${version_file}" | grep -Eo 'v?[0-9]+([.][0-9]+)+([-+][A-Za-z0-9._-]+)?' | head -n1 || true)"
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="$(sed 's/\r$//' "${version_file}" | sed '/^[[:space:]]*$/d' | head -n1)"
+          fi
+          if [[ -z "${upstream_version}" ]]; then
+            upstream_version="unknown-version"
+          fi
+
+          safe_version="$(printf '%s' "${upstream_version}" | sed -E 's/[^A-Za-z0-9._+-]+/-/g; s/^-+//; s/-+$//')"
+          if [[ -z "${safe_version}" ]]; then
+            safe_version="unknown-version"
+          fi
+
+          release_title="SVT-AV1-Essential ${upstream_version}"
+
+          {
+            echo "upstream_version<<EOF"
+            echo "${upstream_version}"
+            echo "EOF"
+            echo "safe_version=${safe_version}"
+            echo "release_title<<EOF"
+            echo "${release_title}"
+            echo "EOF"
+          } >> "${GITHUB_OUTPUT}"
+
+          cat > release-notes.md <<EOF
+          Automated build for nekotrix/SVT-AV1-Essential.
+
+          Upstream version: ${upstream_version}
+          Upstream commit: ${{ needs.check_upstream.outputs.sha }}
+          Build arguments: ${BUILD_ARGS}
+          Platforms: Linux x64, Windows x64
+          EOF
+
+      - name: Create or update release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: svt-av1-essential-${{ steps.release_meta.outputs.safe_version }}
+          RELEASE_TITLE: ${{ steps.release_meta.outputs.release_title }}
+        run: |
+          set -euo pipefail
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            gh release upload "${RELEASE_TAG}" release-assets/* --clobber
+            gh release edit "${RELEASE_TAG}" --title "${RELEASE_TITLE}" --notes-file release-notes.md
+          else
+            gh release create "${RELEASE_TAG}" release-assets/* \
+              --title "${RELEASE_TITLE}" \
+              --notes-file release-notes.md \
+              --target "${GITHUB_SHA}"
+          fi
+
+  mark_built:
+    name: Mark upstream commit as built
+    needs:
+      - check_upstream
+      - build
+      - release
+    if: needs.check_upstream.outputs.should_build == 'true' && needs.check_upstream.outputs.cache_hit != 'true' && success()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Create build marker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .upstream-build-cache
+          echo "${{ needs.check_upstream.outputs.sha }}" > .upstream-build-cache/upstream-sha.txt
+
+      - name: Save build marker
+        uses: actions/cache/save@v4
+        with:
+          path: .upstream-build-cache
+          key: svt-av1-essential-${{ needs.check_upstream.outputs.sha }}
