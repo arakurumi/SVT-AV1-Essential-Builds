@@ -17,7 +17,7 @@ permissions:
 
 env:
   UPSTREAM_REPOSITORY: https://github.com/nekotrix/SVT-AV1-Essential.git
-  BUILD_ARGS: --release --static use-ffms2 ext-lib-static
+  BUILD_ARGS: --release --disable-lto --static use-ffms2 ext-lib-static
   FFMPEG_REPOSITORY: https://github.com/FFmpeg/FFmpeg.git
   FFMPEG_REF: n8.1.1
   FFMS2_REPOSITORY: https://github.com/FFMS/ffms2.git
