@@ -18,6 +18,10 @@ permissions:
 env:
   UPSTREAM_REPOSITORY: https://github.com/nekotrix/SVT-AV1-Essential.git
   BUILD_ARGS: --release --enable-lto --static use-ffms2 ext-lib-static
+  FFMPEG_REPOSITORY: https://github.com/FFmpeg/FFmpeg.git
+  FFMPEG_REF: n8.1.1
+  FFMS2_REPOSITORY: https://github.com/FFMS/ffms2.git
+  FFMS2_REF: master
 
 concurrency:
   group: svt-av1-essential-${{ github.event_name }}-${{ github.ref }}
@@ -48,9 +52,7 @@ jobs:
             exit 1
           fi
 
-          {
-            echo "sha=${SHA}"
-          } >> "${GITHUB_OUTPUT}"
+          echo "sha=${SHA}" >> "${GITHUB_OUTPUT}"
 
       - name: Restore build marker
         id: built_cache
@@ -99,34 +101,114 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
+            autoconf \
+            automake \
             build-essential \
             clang \
             cmake \
             git \
-            libffms2-dev \
+            libtool \
             lld \
+            make \
             nasm \
             ninja-build \
             pkg-config \
-            yasm
+            yasm \
+            zlib1g-dev
 
       - name: Set up MSYS2
         if: runner.os == 'Windows'
         uses: msys2/setup-msys2@v2
         with:
-          msystem: CLANG64
+          msystem: UCRT64
           update: true
           install: >-
             git
             base-devel
-            mingw-w64-clang-x86_64-clang
-            mingw-w64-clang-x86_64-cmake
-            mingw-w64-clang-x86_64-ffms2
-            mingw-w64-clang-x86_64-lld
-            mingw-w64-clang-x86_64-nasm
-            mingw-w64-clang-x86_64-ninja
-            mingw-w64-clang-x86_64-pkgconf
-            mingw-w64-clang-x86_64-yasm
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-nasm
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-yasm
+
+      - name: Build Linux static FFmpeg and FFMS2
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          export DEPS_PREFIX="${GITHUB_WORKSPACE}/static-deps"
+          mkdir -p "${DEPS_PREFIX}"
+
+          git clone --depth 1 --branch "${FFMPEG_REF}" "${FFMPEG_REPOSITORY}" ffmpeg
+          cd ffmpeg
+          ./configure \
+            --prefix="${DEPS_PREFIX}" \
+            --disable-shared \
+            --enable-static \
+            --disable-programs \
+            --disable-doc \
+            --disable-debug \
+            --disable-network \
+            --disable-autodetect \
+            --extra-cflags="-fPIC"
+          make -j"$(nproc)"
+          make install
+          cd ..
+
+          git clone --depth 1 --branch "${FFMS2_REF}" "${FFMS2_REPOSITORY}" ffms2
+          cd ffms2
+          ./autogen.sh
+          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" PKG_CONFIG="pkg-config --static" ./configure \
+            --prefix="${DEPS_PREFIX}" \
+            --disable-shared \
+            --enable-static \
+            --disable-dependency-tracking
+          make -j"$(nproc)"
+          make install
+          test -f "${DEPS_PREFIX}/lib/libffms2.a"
+          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" pkg-config --static --libs ffms2
+
+      - name: Build Windows static FFmpeg and FFMS2
+        if: runner.os == 'Windows'
+        shell: msys2 {0}
+        run: |
+          set -euo pipefail
+          workspace="$(cygpath -u "${GITHUB_WORKSPACE}")"
+          export DEPS_PREFIX="${workspace}/static-deps"
+          mkdir -p "${DEPS_PREFIX}"
+
+          git clone --depth 1 --branch "${FFMPEG_REF}" "${FFMPEG_REPOSITORY}" ffmpeg
+          cd ffmpeg
+          ./configure \
+            --prefix="${DEPS_PREFIX}" \
+            --target-os=mingw32 \
+            --arch=x86_64 \
+            --disable-shared \
+            --enable-static \
+            --disable-programs \
+            --disable-doc \
+            --disable-debug \
+            --disable-network \
+            --disable-autodetect \
+            --extra-cflags="-D_WIN32_WINNT=0x0601" \
+            --extra-ldflags="-static"
+          make -j"$(nproc)"
+          make install
+          cd ..
+
+          git clone --depth 1 --branch "${FFMS2_REF}" "${FFMS2_REPOSITORY}" ffms2
+          cd ffms2
+          ./autogen.sh
+          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" PKG_CONFIG="pkg-config --static" ./configure \
+            --prefix="${DEPS_PREFIX}" \
+            --disable-shared \
+            --enable-static \
+            --disable-dependency-tracking
+          make -j"$(nproc)"
+          make install
+          test -f "${DEPS_PREFIX}/lib/libffms2.a"
+          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" pkg-config --static --libs ffms2
 
       - name: Clone upstream
         shell: bash
@@ -146,15 +228,16 @@ jobs:
         run: |
           set -euo pipefail
           cd source/Build/linux
-          ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
+          PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
 
       - name: Build Windows binary
         if: runner.os == 'Windows'
         shell: msys2 {0}
         run: |
           set -euo pipefail
+          workspace="$(cygpath -u "${GITHUB_WORKSPACE}")"
           cd source/Build/linux
-          ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)" -- \
+          PKG_CONFIG_PATH="${workspace}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=gcc cxx=g++ jobs="$(nproc)" -- \
             -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
 
       - name: Package Linux artifact
@@ -170,7 +253,7 @@ jobs:
           source/Bin/Release/SvtAv1EncApp --version | tee package/version.txt
           { ldd source/Bin/Release/SvtAv1EncApp || true; } | tee package/ldd.txt
           if grep -Ei 'lib(ffms2|avcodec|avformat|avutil|swscale|swresample)[.]' package/ldd.txt; then
-            echo "::error::FFMS2/FFmpeg is still dynamically linked. ext-lib-static requires static external libraries."
+            echo "::error::FFMS2/FFmpeg is still dynamically linked. static FFmpeg/FFMS2 build was not used."
             exit 1
           fi
 
@@ -187,7 +270,7 @@ jobs:
           source/Bin/Release/SvtAv1EncApp.exe --version | tee package/version.txt
           { ldd source/Bin/Release/SvtAv1EncApp.exe || true; } | tee package/ldd.txt
           if grep -Ei '(ffms2|avcodec|avformat|avutil|swscale|swresample).*\.(dll|so)' package/ldd.txt; then
-            echo "::error::FFMS2/FFmpeg is still dynamically linked. ext-lib-static requires static external libraries."
+            echo "::error::FFMS2/FFmpeg is still dynamically linked. static FFmpeg/FFMS2 build was not used."
             exit 1
           fi
 
@@ -290,6 +373,7 @@ jobs:
           Upstream version: ${upstream_version}
           Upstream commit: ${{ needs.check_upstream.outputs.sha }}
           Build arguments: ${BUILD_ARGS}
+          Static deps: FFmpeg ${FFMPEG_REF}, FFMS2 ${FFMS2_REF}
           Platforms: Linux x64, Windows x64
           EOF
 
