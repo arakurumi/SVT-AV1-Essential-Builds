@@ -241,14 +241,20 @@ jobs:
 
           test "$(git -C source rev-parse HEAD)" = "${{ needs.check_upstream.outputs.sha }}"
 
+      - name: Patch CMakeLists for static FFMS2 linkage
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -pi -e 's/list\(APPEND FFMS2_LIBRARY "\$\{BASE\}\$\{SUFFIX\}"\)/list(APPEND FFMS2_LIBRARY "\${BASE}")/g' source/CMakeLists.txt
+          grep -F 'list(APPEND FFMS2_LIBRARY "${BASE}")' source/CMakeLists.txt
+
       - name: Patch Linux static link options
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
-
-          perl -0pi -e 's/(option\(EXT_LIB_STATIC "Force linking with static libraries for external dependencies" OFF\))/if(UNIX AND NOT APPLE)\n    target_link_options(SvtAv1EncApp PRIVATE -static -no-pie)\nendif()\n\n$1/' source/CMakeLists.txt
-          grep -F 'target_link_options(SvtAv1EncApp PRIVATE -static -no-pie)' source/CMakeLists.txt
+          echo -e "\nif(UNIX AND NOT APPLE)\n    target_link_options(SvtAv1EncApp PRIVATE -static -no-pie)\nendif()" >> source/Source/App/CMakeLists.txt
+          tail -n 5 source/Source/App/CMakeLists.txt
 
       - name: Build Linux binary
         if: runner.os == 'Linux'
