@@ -1,6 +1,9 @@
 name: Build SVT-AV1-Essential
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       force:
@@ -68,6 +71,8 @@ jobs:
           set -euo pipefail
 
           if [[ "${{ github.event_name }}" == "workflow_dispatch" && "${{ github.event.inputs.force }}" == "true" ]]; then
+            SHOULD_BUILD="true"
+          elif [[ "${{ github.event_name }}" == "push" ]]; then
             SHOULD_BUILD="true"
           elif [[ "${{ steps.built_cache.outputs.cache-hit }}" == "true" ]]; then
             SHOULD_BUILD="false"
