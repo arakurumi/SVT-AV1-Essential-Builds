@@ -59,7 +59,7 @@ jobs:
 
       - name: Restore build marker
         id: built_cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v5
         with:
           path: .upstream-build-cache
           key: svt-av1-essential-${{ steps.upstream.outputs.sha }}
@@ -458,7 +458,7 @@ jobs:
           echo "${{ needs.check_upstream.outputs.sha }}" > .upstream-build-cache/upstream-sha.txt
 
       - name: Save build marker
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v5
         with:
           path: .upstream-build-cache
           key: svt-av1-essential-${{ needs.check_upstream.outputs.sha }}
