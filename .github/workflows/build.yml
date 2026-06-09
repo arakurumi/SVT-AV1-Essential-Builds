@@ -248,7 +248,7 @@ jobs:
           set -euo pipefail
           cd source/Build/linux
           PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)" -- \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++ -no-pie"
+            -DCMAKE_EXE_LINKER_FLAGS="-static -no-pie"
 
       - name: Build Windows binary
         if: runner.os == 'Windows'
