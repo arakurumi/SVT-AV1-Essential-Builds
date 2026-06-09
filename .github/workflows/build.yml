@@ -257,6 +257,13 @@ jobs:
           perl -pi -e 's/list\(APPEND FFMS2_LIBRARY "\$\{BASE\}\$\{SUFFIX\}"\)/list(APPEND FFMS2_LIBRARY "\${BASE}")/g' source/CMakeLists.txt
           grep -F 'list(APPEND FFMS2_LIBRARY "${BASE}")' source/CMakeLists.txt
 
+      - name: Patch CMakeLists to prevent unused argument errors in compiler checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          perl -pi -e 's/set\(CMAKE_C_FLAGS "\$\{CMAKE_C_FLAGS\} -Werror=unused-command-line-argument"\)/# $&/g' source/CMakeLists.txt
+          perl -pi -e 's/set\(CMAKE_CXX_FLAGS "\$\{CMAKE_CXX_FLAGS\} -Werror=unused-command-line-argument"\)/# $&/g' source/CMakeLists.txt
+
       - name: Patch Linux static link options
         if: runner.os == 'Linux'
         shell: bash
