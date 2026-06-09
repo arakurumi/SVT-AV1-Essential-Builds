@@ -6,14 +6,14 @@ This repository builds [nekotrix/SVT-AV1-Essential](https://github.com/nekotrix/
 
 - Linux x64 on `ubuntu-24.04`
 - Windows x64 on `windows-2022` through MSYS2 `CLANG64`
-- Build arguments: `--release --enable-lto --static use-ffms2`
+- Build arguments: `--release --enable-lto --static use-ffms2 ext-lib-static`
 
 The workflow uploads GitHub Actions artifacts named:
 
 - `svt-av1-essential-linux-x64-<upstream-version>`
 - `svt-av1-essential-windows-x64-<upstream-version>`
 
-Each artifact includes the built encoder, license files, the upstream commit SHA, version output, and dependency information. The Windows artifact also includes MSYS2 DLL dependencies detected by `ldd`.
+Each artifact includes the built encoder, license files, the upstream commit SHA, version output, and dependency information. The Windows artifact is expected to contain a standalone `.exe`; the workflow fails if MSYS2 DLL dependencies are still required.
 
 The workflow also creates a GitHub Release after both platform builds finish. Release titles use the upstream version reported by the built encoder, release tags use `svt-av1-essential-<upstream-version>`, and each versioned build artifact is attached as a `.tar.gz` asset. If a manual forced build targets a version that already has a release, the release assets are replaced.
 

@@ -17,7 +17,7 @@ permissions:
 
 env:
   UPSTREAM_REPOSITORY: https://github.com/nekotrix/SVT-AV1-Essential.git
-  BUILD_ARGS: --release --enable-lto --static use-ffms2
+  BUILD_ARGS: --release --enable-lto --static use-ffms2 ext-lib-static
 
 concurrency:
   group: svt-av1-essential-${{ github.event_name }}-${{ github.ref }}
@@ -154,7 +154,8 @@ jobs:
         run: |
           set -euo pipefail
           cd source/Build/linux
-          ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
+          ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)" -- \
+            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++"
 
       - name: Package Linux artifact
         if: runner.os == 'Linux'
@@ -168,7 +169,10 @@ jobs:
           git -C source rev-parse HEAD > package/upstream-sha.txt
           source/Bin/Release/SvtAv1EncApp --version | tee package/version.txt
           { ldd source/Bin/Release/SvtAv1EncApp || true; } | tee package/ldd.txt
-          grep -i ffms package/ldd.txt || echo "No dynamic FFMS2 dependency found; this is expected for static FFMS2 linkage."
+          if grep -Ei 'lib(ffms2|avcodec|avformat|avutil|swscale|swresample)[.]' package/ldd.txt; then
+            echo "::error::FFMS2/FFmpeg is still dynamically linked. ext-lib-static requires static external libraries."
+            exit 1
+          fi
 
       - name: Package Windows artifact
         if: runner.os == 'Windows'
@@ -182,13 +186,20 @@ jobs:
           git -C source rev-parse HEAD > package/upstream-sha.txt
           source/Bin/Release/SvtAv1EncApp.exe --version | tee package/version.txt
           { ldd source/Bin/Release/SvtAv1EncApp.exe || true; } | tee package/ldd.txt
-          grep -i ffms package/ldd.txt || echo "No dynamic FFMS2 dependency found; this is expected for static FFMS2 linkage."
+          if grep -Ei '(ffms2|avcodec|avformat|avutil|swscale|swresample).*\.(dll|so)' package/ldd.txt; then
+            echo "::error::FFMS2/FFmpeg is still dynamically linked. ext-lib-static requires static external libraries."
+            exit 1
+          fi
 
-          awk '/\/clang64\/bin\// { print $3 }' package/ldd.txt | sort -u | while read -r dll; do
-            if [[ -f "${dll}" ]]; then
-              cp -n "${dll}" package/
-            fi
-          done
+          if grep -Ei '/(clang64|mingw64|ucrt64)/bin/.*[.]dll' package/ldd.txt; then
+            echo "::error::Windows binary is still linked to MSYS2 DLLs. Build must be standalone before release."
+            exit 1
+          fi
+
+          if find package -maxdepth 1 -iname '*.dll' | grep -q .; then
+            echo "::error::Windows package contains DLL files; expected standalone executable only."
+            exit 1
+          fi
 
       - name: Read package version
         id: package_meta
