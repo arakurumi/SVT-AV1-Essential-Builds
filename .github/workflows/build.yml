@@ -126,6 +126,7 @@ jobs:
             git
             base-devel
             mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-autotools
             mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-nasm
             mingw-w64-ucrt-x86_64-ninja
@@ -144,6 +145,7 @@ jobs:
           cd ffmpeg
           ./configure \
             --prefix="${DEPS_PREFIX}" \
+            --pkgconfigdir="${DEPS_PREFIX}/lib/pkgconfig" \
             --disable-shared \
             --enable-static \
             --disable-programs \
@@ -155,11 +157,19 @@ jobs:
           make -j"$(nproc)"
           make install
           cd ..
+          export PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig"
+          if [[ ! -f "${PKG_CONFIG_PATH}/libavformat.pc" ]]; then
+            echo "::error::FFmpeg pkg-config files were not installed in ${PKG_CONFIG_PATH}."
+            find "${DEPS_PREFIX}" -type f -name '*.pc' -print
+            exit 1
+          fi
+          pkg-config --print-errors --exists libavformat libavcodec libswscale libavutil libswresample
+          pkg-config --modversion libavformat libavcodec libswscale libavutil libswresample
 
           git clone --depth 1 --branch "${FFMS2_REF}" "${FFMS2_REPOSITORY}" ffms2
           cd ffms2
           ./autogen.sh
-          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" PKG_CONFIG="pkg-config --static" ./configure \
+          PKG_CONFIG="pkg-config --static" ./configure \
             --prefix="${DEPS_PREFIX}" \
             --disable-shared \
             --enable-static \
@@ -167,7 +177,7 @@ jobs:
           make -j"$(nproc)"
           make install
           test -f "${DEPS_PREFIX}/lib/libffms2.a"
-          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" pkg-config --static --libs ffms2
+          pkg-config --static --libs ffms2
 
       - name: Build Windows static FFmpeg and FFMS2
         if: runner.os == 'Windows'
@@ -182,6 +192,7 @@ jobs:
           cd ffmpeg
           ./configure \
             --prefix="${DEPS_PREFIX}" \
+            --pkgconfigdir="${DEPS_PREFIX}/lib/pkgconfig" \
             --target-os=mingw32 \
             --arch=x86_64 \
             --disable-shared \
@@ -196,11 +207,19 @@ jobs:
           make -j"$(nproc)"
           make install
           cd ..
+          export PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig"
+          if [[ ! -f "${PKG_CONFIG_PATH}/libavformat.pc" ]]; then
+            echo "::error::FFmpeg pkg-config files were not installed in ${PKG_CONFIG_PATH}."
+            find "${DEPS_PREFIX}" -type f -name '*.pc' -print
+            exit 1
+          fi
+          pkg-config --print-errors --exists libavformat libavcodec libswscale libavutil libswresample
+          pkg-config --modversion libavformat libavcodec libswscale libavutil libswresample
 
           git clone --depth 1 --branch "${FFMS2_REF}" "${FFMS2_REPOSITORY}" ffms2
           cd ffms2
           ./autogen.sh
-          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" PKG_CONFIG="pkg-config --static" ./configure \
+          PKG_CONFIG="pkg-config --static" ./configure \
             --prefix="${DEPS_PREFIX}" \
             --disable-shared \
             --enable-static \
@@ -208,7 +227,7 @@ jobs:
           make -j"$(nproc)"
           make install
           test -f "${DEPS_PREFIX}/lib/libffms2.a"
-          PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig" pkg-config --static --libs ffms2
+          pkg-config --static --libs ffms2
 
       - name: Clone upstream
         shell: bash
