@@ -6,7 +6,7 @@ This repository builds [nekotrix/SVT-AV1-Essential](https://github.com/nekotrix/
 
 - Linux x64 on `ubuntu-24.04`
 - Windows x64 on `windows-2022` through MSYS2 `UCRT64`
-- Build arguments: `--release --enable-lto --static use-ffms2 ext-lib-static`
+- Build arguments: `--disable-lto --release --static ext-lib-static use-ffms2`
 
 The workflow uploads GitHub Actions artifacts named:
 
