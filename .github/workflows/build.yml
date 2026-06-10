@@ -283,15 +283,14 @@ jobs:
             echo "EOF"
           } >> "${GITHUB_OUTPUT}"
 
-          sed 's/^          //' > release-notes.md <<EOF
-          Automated build for nekotrix/SVT-AV1-Essential.
-
-          Upstream version: ${upstream_version}
-          Upstream commit: ${{ needs.check_upstream.outputs.sha }}
-          Build arguments: \`${BUILD_ARGS}\`
-          Static deps: FFmpeg ${FFMPEG_REF}, FFMS2 ${FFMS2_REF}
-          Platforms: Linux x64, Windows x64
-          EOF
+          printf "%s\n" \
+            "Automated build for nekotrix/SVT-AV1-Essential." \
+            "" \
+            "Upstream version: ${upstream_version}" \
+            "Upstream commit: ${{ needs.check_upstream.outputs.sha }}" \
+            "Build arguments: \`${BUILD_ARGS}\`" \
+            "Static deps: FFmpeg ${FFMPEG_REF}, FFMS2 ${FFMS2_REF}" \
+            "Platforms: Linux x64, Windows x64" > release-notes.md
 
       - name: Create or update release
         shell: bash
