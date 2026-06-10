@@ -99,6 +99,9 @@ jobs:
             runner: windows-2022
             artifact: svt-av1-essential-windows-x64
     steps:
+      - name: Checkout builder repository
+        uses: actions/checkout@v4
+
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
         shell: bash
@@ -141,102 +144,15 @@ jobs:
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-yasm
 
-      - name: Build Linux static FFmpeg and FFMS2
+      - name: Build static FFmpeg and FFMS2 (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          export DEPS_PREFIX="${GITHUB_WORKSPACE}/static-deps"
-          mkdir -p "${DEPS_PREFIX}"
+        run: bash scripts/build-deps.sh
 
-          git clone --depth 1 --branch "${FFMPEG_REF}" "${FFMPEG_REPOSITORY}" ffmpeg
-          cd ffmpeg
-          ./configure \
-            --arch=x86_64 \
-            --disable-autodetect \
-            --disable-debug \
-            --disable-doc \
-            --disable-network \
-            --disable-programs \
-            --disable-shared \
-            --enable-static \
-            --extra-cflags="-fPIC" \
-            --pkgconfigdir="${DEPS_PREFIX}/lib/pkgconfig" \
-            --prefix="${DEPS_PREFIX}"
-          make -j"$(nproc)"
-          make install
-          cd ..
-          export PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig"
-          if [[ ! -f "${PKG_CONFIG_PATH}/libavformat.pc" ]]; then
-            echo "::error::FFmpeg pkg-config files were not installed in ${PKG_CONFIG_PATH}."
-            find "${DEPS_PREFIX}" -type f -name '*.pc' -print
-            exit 1
-          fi
-          pkg-config --print-errors --exists libavformat libavcodec libswscale libavutil libswresample
-          pkg-config --modversion libavformat libavcodec libswscale libavutil libswresample
-
-          git clone --depth 1 --branch "${FFMS2_REF}" "${FFMS2_REPOSITORY}" ffms2
-          cd ffms2
-          ./autogen.sh
-          PKG_CONFIG="pkg-config --static" ./configure \
-            --prefix="${DEPS_PREFIX}" \
-            --disable-shared \
-            --enable-static \
-            --disable-dependency-tracking
-          make -j"$(nproc)"
-          make install
-          test -f "${DEPS_PREFIX}/lib/libffms2.a"
-          pkg-config --static --libs ffms2
-
-      - name: Build Windows static FFmpeg and FFMS2
+      - name: Build static FFmpeg and FFMS2 (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          workspace="$(cygpath -u "${GITHUB_WORKSPACE}")"
-          export DEPS_PREFIX="${workspace}/static-deps"
-          mkdir -p "${DEPS_PREFIX}"
-
-          git clone --depth 1 --branch "${FFMPEG_REF}" "${FFMPEG_REPOSITORY}" ffmpeg
-          cd ffmpeg
-          ./configure \
-            --arch=x86_64 \
-            --disable-autodetect \
-            --disable-debug \
-            --disable-doc \
-            --disable-network \
-            --disable-programs \
-            --disable-shared \
-            --enable-static \
-            --extra-cflags="-D_WIN32_WINNT=0x0601" \
-            --extra-ldflags="-static" \
-            --pkgconfigdir="${DEPS_PREFIX}/lib/pkgconfig" \
-            --prefix="${DEPS_PREFIX}" \
-            --target-os=mingw32
-          make -j"$(nproc)"
-          make install
-          cd ..
-          export PKG_CONFIG_PATH="${DEPS_PREFIX}/lib/pkgconfig"
-          if [[ ! -f "${PKG_CONFIG_PATH}/libavformat.pc" ]]; then
-            echo "::error::FFmpeg pkg-config files were not installed in ${PKG_CONFIG_PATH}."
-            find "${DEPS_PREFIX}" -type f -name '*.pc' -print
-            exit 1
-          fi
-          pkg-config --print-errors --exists libavformat libavcodec libswscale libavutil libswresample
-          pkg-config --modversion libavformat libavcodec libswscale libavutil libswresample
-
-          git clone --depth 1 --branch "${FFMS2_REF}" "${FFMS2_REPOSITORY}" ffms2
-          cd ffms2
-          ./autogen.sh
-          PKG_CONFIG="pkg-config --static" ./configure \
-            --prefix="${DEPS_PREFIX}" \
-            --disable-shared \
-            --enable-static \
-            --disable-dependency-tracking
-          make -j"$(nproc)"
-          make install
-          test -f "${DEPS_PREFIX}/lib/libffms2.a"
-          pkg-config --static --libs ffms2
+        run: bash scripts/build-deps.sh
 
       - name: Clone upstream
         shell: bash
@@ -264,76 +180,25 @@ jobs:
           perl -pi -e 's/set\(CMAKE_C_FLAGS "\$\{CMAKE_C_FLAGS\} -Werror=unused-command-line-argument"\)/# $&/g' source/CMakeLists.txt
           perl -pi -e 's/set\(CMAKE_CXX_FLAGS "\$\{CMAKE_CXX_FLAGS\} -Werror=unused-command-line-argument"\)/# $&/g' source/CMakeLists.txt
 
-      - name: Patch Linux static link options
+      - name: Build binary (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
-          echo -e "\nif(UNIX AND NOT APPLE)\n    target_link_options(SvtAv1EncApp PRIVATE -static -no-pie)\nendif()" >> source/Source/App/CMakeLists.txt
-          tail -n 5 source/Source/App/CMakeLists.txt
+        run: bash scripts/build-app.sh
 
-      - name: Build Linux binary
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd source/Build/linux
-          PKG_CONFIG_PATH="${GITHUB_WORKSPACE}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)"
-
-      - name: Build Windows binary
+      - name: Build binary (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: |
-          set -euo pipefail
-          workspace="$(cygpath -u "${GITHUB_WORKSPACE}")"
-          cd source/Build/linux
-          PKG_CONFIG_PATH="${workspace}/static-deps/lib/pkgconfig" ./build.sh ${BUILD_ARGS} cc=clang cxx=clang++ jobs="$(nproc)" -- \
-            -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
-            -DCMAKE_CXX_STANDARD_LIBRARIES="-static -static-libgcc -static-libstdc++ -Wl,-Bstatic -lstdc++ -lpthread"
+        run: bash scripts/build-app.sh
 
-      - name: Package Linux artifact
+      - name: Package artifact (Linux)
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          set -euo pipefail
+        run: bash scripts/package.sh
 
-          install -d package
-          cp source/Bin/Release/SvtAv1EncApp package/
-          cp source/LICENSE*.md source/PATENTS.md package/
-          git -C source rev-parse HEAD > package/upstream-sha.txt
-          source/Bin/Release/SvtAv1EncApp --version | tee package/version.txt
-          { ldd source/Bin/Release/SvtAv1EncApp || true; } | tee package/ldd.txt
-          if grep -Ei 'lib(ffms2|avcodec|avformat|avutil|swscale|swresample)[.]' package/ldd.txt; then
-            echo "::error::FFMS2/FFmpeg is still dynamically linked. static FFmpeg/FFMS2 build was not used."
-            exit 1
-          fi
-
-      - name: Package Windows artifact
+      - name: Package artifact (Windows)
         if: runner.os == 'Windows'
         shell: msys2 {0}
-        run: |
-          set -euo pipefail
-
-          mkdir -p package
-          cp source/Bin/Release/SvtAv1EncApp.exe package/
-          cp source/LICENSE*.md source/PATENTS.md package/
-          git -C source rev-parse HEAD > package/upstream-sha.txt
-          source/Bin/Release/SvtAv1EncApp.exe --version | tee package/version.txt
-          { ldd source/Bin/Release/SvtAv1EncApp.exe || true; } | tee package/ldd.txt
-          if grep -Ei '(ffms2|avcodec|avformat|avutil|swscale|swresample).*\.(dll|so)' package/ldd.txt; then
-            echo "::error::FFMS2/FFmpeg is still dynamically linked. static FFmpeg/FFMS2 build was not used."
-            exit 1
-          fi
-
-          if grep -Ei '/(clang64|mingw64|ucrt64)/bin/.*[.]dll' package/ldd.txt; then
-            echo "::error::Windows binary is still linked to MSYS2 DLLs. Build must be standalone before release."
-            exit 1
-          fi
-
-          if find package -maxdepth 1 -iname '*.dll' | grep -q .; then
-            echo "::error::Windows package contains DLL files; expected standalone executable only."
-            exit 1
-          fi
+        run: bash scripts/package.sh
 
       - name: Read package version
         id: package_meta
@@ -423,7 +288,7 @@ jobs:
 
           Upstream version: ${upstream_version}
           Upstream commit: ${{ needs.check_upstream.outputs.sha }}
-          Build arguments: ${BUILD_ARGS}
+          Build arguments: `${BUILD_ARGS}`
           Static deps: FFmpeg ${FFMPEG_REF}, FFMS2 ${FFMS2_REF}
           Platforms: Linux x64, Windows x64
           EOF
