@@ -284,14 +284,14 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
           cat > release-notes.md <<EOF
-          Automated build for nekotrix/SVT-AV1-Essential.
+Automated build for nekotrix/SVT-AV1-Essential.
 
-          Upstream version: ${upstream_version}
-          Upstream commit: ${{ needs.check_upstream.outputs.sha }}
-          Build arguments: `${BUILD_ARGS}`
-          Static deps: FFmpeg ${FFMPEG_REF}, FFMS2 ${FFMS2_REF}
-          Platforms: Linux x64, Windows x64
-          EOF
+Upstream version: ${upstream_version}
+Upstream commit: ${{ needs.check_upstream.outputs.sha }}
+Build arguments: \`${BUILD_ARGS}\`
+Static deps: FFmpeg ${FFMPEG_REF}, FFMS2 ${FFMS2_REF}
+Platforms: Linux x64, Windows x64
+EOF
 
       - name: Create or update release
         shell: bash
