@@ -100,7 +100,7 @@ jobs:
             artifact: svt-av1-essential-windows-x64
     steps:
       - name: Checkout builder repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install Linux dependencies
         if: runner.os == 'Linux'
@@ -225,7 +225,7 @@ jobs:
           } >> "${GITHUB_OUTPUT}"
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}-${{ steps.package_meta.outputs.safe_version }}
           path: package/
